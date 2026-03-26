@@ -1,0 +1,17 @@
+{
+  "name": "BondiComunidad Cba",
+  "short_name": "BondiCba",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#d35400",
+  "description": "Reportes de transporte en tiempo real para Córdoba Capital.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/713/713311.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
