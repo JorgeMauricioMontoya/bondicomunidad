@@ -6,25 +6,30 @@
     <title>BondiComunidad Cba 🚌</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="style.css">
-    <link rel="manifest" href="manifest.json">
-    <meta name="theme-color" content="#d35400"> 
 </head>
 <body>
     <div id="map"></div>
     
     <div class="ui-overlay">
         <h1>BondiComunidad 🚌</h1>
-        <p>Seleccioná tu línea para ver las paradas en tiempo real:</p>
         
-        <select id="route-selector">
-            <option value="">Cargando archivos...</option>
+        <div class="search-box">
+            <input type="text" id="route-search" placeholder="🔍 Buscar línea (ej: 20, 80)...">
+        </div>
+
+        <div class="direction-toggle">
+            <input type="radio" id="dir0" name="direction" value="0" checked>
+            <label for="dir0">➡️ Ida</label>
+            <input type="radio" id="dir1" name="direction" value="1">
+            <label for="dir1">⬅️ Vuelta</label>
+        </div>
+
+        <select id="route-selector" size="5">
+            <option value="">Sincronizando datos...</option>
         </select>
 
-        <button class="loc-btn" onclick="ubicarme()">
-            📍 Mi ubicación actual
-        </button>
-
-        <div id="status">Iniciando aplicación...</div>
+        <button class="loc-btn" id="btn-ubicacion">📍 Mi ubicación</button>
+        <div id="status">Iniciando sistema...</div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
