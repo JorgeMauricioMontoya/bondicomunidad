@@ -1,5 +1,5 @@
 /**
- * BONDI COMUNIDAD CBA - VERSIÓN FINAL (FLOTA + RAMPAS ACCESIBLES)
+ * BONDI COMUNIDAD CBA - VERSIÓN FINAL DEFINITIVA (UX CELULAR MEJORADA)
  * Analista/Dev: Mauricio
  */
 
@@ -20,21 +20,18 @@ let currentDirection = "0";
 let userMarker = null; 
 let intervaloBondi = null; 
 
-// 1. CARGAR ARCHIVOS
 async function loadFile(file) {
     const res = await fetch(file);
     const text = await res.text();
     return new Promise(resolve => {
         Papa.parse(text, { 
-            header: true, 
-            skipEmptyLines: true, 
+            header: true, skipEmptyLines: true, 
             transformHeader: header => header.trim().replace(/^\uFEFF/,''), 
             complete: r => resolve(r.data) 
         });
     });
 }
 
-// 2. LÓGICA DE CALENDARIO
 function getValidServiceIds() {
     const ahora = new Date();
     const hoyStr = ahora.toISOString().split('T')[0].replace(/-/g, '');
@@ -55,7 +52,6 @@ function getValidServiceIds() {
     return [...new Set(validos)];
 }
 
-// 3. INICIO
 async function init() {
     const status = document.getElementById('status');
     try {
@@ -76,11 +72,27 @@ async function init() {
     }
 }
 
-// 4. LISTENERS
 function setupEventListeners() {
+    const panel = document.getElementById('panel-interfaz');
+    const btnColapsar = document.getElementById('btn-colapsar');
+    const tituloPanel = document.querySelector('#panel-interfaz h1'); // Enganchamos el título
+
+    // NUEVO: Función única para abrir/cerrar
+    const togglePanel = () => {
+        panel.classList.toggle('oculto');
+    };
+
+    // Ahora ambos elementos abren y cierran el menú en celular
+    if (btnColapsar) btnColapsar.addEventListener('click', togglePanel);
+    if (tituloPanel) tituloPanel.addEventListener('click', togglePanel);
+
     document.getElementById('route-selector').addEventListener('change', (e) => {
         currentRouteId = e.target.value;
         filterMap(currentRouteId);
+        
+        if (window.innerWidth <= 768) {
+            panel.classList.add('oculto'); 
+        }
     });
 
     document.getElementById('route-search').addEventListener('input', (e) => {
@@ -105,6 +117,9 @@ function setupEventListeners() {
 
     document.getElementById('btn-ubicacion').addEventListener('click', () => {
         map.locate({setView: true, maxZoom: 16});
+        if (window.innerWidth <= 768) {
+            panel.classList.add('oculto'); 
+        }
     });
 }
 
@@ -198,7 +213,6 @@ async function filterMap(routeId) {
     document.getElementById('status').innerText = `Línea ${route.route_short_name} cargada.`;
 }
 
-// 5. LÓGICA MATEMÁTICA: FLOTA CON RAMPAS Y SIN AMONTONAMIENTO
 function actualizarFlota(tripsActivos) {
     busLayer.clearLayers(); 
 
@@ -208,6 +222,8 @@ function actualizarFlota(tripsActivos) {
                        ahora.getSeconds().toString().padStart(2, '0');
 
     let bondisDibujados = 0;
+    const MAX_BONDIS = 6; 
+    
     const tripIdsDeHoy = tripsActivos.map(t => String(t.trip_id).trim());
 
     const paradasPorViaje = {};
@@ -219,9 +235,11 @@ function actualizarFlota(tripsActivos) {
         }
     });
 
-    const tramosOcupados = new Set();
+    const indicesOcupados = [];
 
     for (const tId in paradasPorViaje) {
+        if (bondisDibujados >= MAX_BONDIS) break; 
+
         const paradas = paradasPorViaje[tId].sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
 
         for (let i = 0; i < paradas.length - 1; i++) {
@@ -229,19 +247,25 @@ function actualizarFlota(tripsActivos) {
             const horaLlegadaSiguiente = paradas[i+1].arrival_time.trim();
 
             if (horaActual >= horaSalida && horaActual <= horaLlegadaSiguiente) {
+                
+                let muyCerca = false;
+                for (let j = 0; j < indicesOcupados.length; j++) {
+                    if (Math.abs(indicesOcupados[j] - i) < 6) {
+                        muyCerca = true;
+                        break;
+                    }
+                }
+
+                if (muyCerca) break; 
+
                 const paradaOrigenId = String(paradas[i].stop_id).trim();
                 const paradaDestinoId = String(paradas[i+1].stop_id).trim();
-                const idTramo = `${paradaOrigenId}-${paradaDestinoId}`;
-
-                if (tramosOcupados.has(idTramo)) {
-                    break;
-                }
 
                 const paradaOrigen = data.stops.find(s => String(s.stop_id).trim() === paradaOrigenId);
                 const paradaDestino = data.stops.find(s => String(s.stop_id).trim() === paradaDestinoId);
                 
                 if (paradaOrigen && paradaDestino) {
-                    tramosOcupados.add(idTramo);
+                    indicesOcupados.push(i); 
 
                     const tiempoTotal = convertirAHora(horaLlegadaSiguiente) - convertirAHora(horaSalida);
                     const tiempoPasado = convertirAHora(horaActual) - convertirAHora(horaSalida);
@@ -255,10 +279,7 @@ function actualizarFlota(tripsActivos) {
                     const latActual = lat1 + ((lat2 - lat1) * porcentajeViaje);
                     const lonActual = lon1 + ((lon2 - lon1) * porcentajeViaje);
 
-                    // LÓGICA DE RAMPA: Determinamos si tiene rampa según el ID del viaje (aprox 50% de las veces)
                     const tieneRampa = tId.charCodeAt(tId.length - 1) % 2 === 0;
-                    
-                    // Armamos un HTML especial si tiene rampa, usando CSS en línea para que no toques el style.css
                     const htmlIcono = tieneRampa 
                         ? `<div style="position:relative; display:inline-block;">🚌<span style="position:absolute; bottom:-6px; right:-8px; font-size:12px; background:white; border-radius:50%; width:16px; height:16px; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,0.4);" title="Unidad Accesible">♿</span></div>`
                         : `🚌`;
