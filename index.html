@@ -11,7 +11,6 @@
     <div id="map"></div>
     
     <div class="ui-overlay" id="panel-interfaz">
-        
         <div class="drag-area" id="btn-colapsar">
             <div class="drag-handle"></div>
         </div>
@@ -29,9 +28,9 @@
             <label for="dir1">⬅️ Vuelta</label>
         </div>
 
-        <select id="route-selector" size="5">
-            <option value="">Sincronizando datos...</option>
-        </select>
+        <div id="route-list" class="route-list">
+            <div style="padding: 10px; text-align: center; color: #7f8c8d;">Sincronizando datos...</div>
+        </div>
 
         <button class="loc-btn" id="btn-ubicacion">📍 Mi ubicación</button>
         <div id="status">Iniciando sistema...</div>

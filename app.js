@@ -1,5 +1,5 @@
 /**
- * BONDI COMUNIDAD CBA - VERSIÓN FINAL DEFINITIVA (UX CELULAR MEJORADA)
+ * BONDI COMUNIDAD CBA - VERSIÓN DEFINITIVA (UI MOBILE ARREGLADA)
  * Analista/Dev: Mauricio
  */
 
@@ -75,31 +75,17 @@ async function init() {
 function setupEventListeners() {
     const panel = document.getElementById('panel-interfaz');
     const btnColapsar = document.getElementById('btn-colapsar');
-    const tituloPanel = document.querySelector('#panel-interfaz h1'); // Enganchamos el título
+    const tituloPanel = document.querySelector('#panel-interfaz h1');
 
-    // NUEVO: Función única para abrir/cerrar
-    const togglePanel = () => {
-        panel.classList.toggle('oculto');
-    };
-
-    // Ahora ambos elementos abren y cierran el menú en celular
+    const togglePanel = () => { panel.classList.toggle('oculto'); };
     if (btnColapsar) btnColapsar.addEventListener('click', togglePanel);
     if (tituloPanel) tituloPanel.addEventListener('click', togglePanel);
 
-    document.getElementById('route-selector').addEventListener('change', (e) => {
-        currentRouteId = e.target.value;
-        filterMap(currentRouteId);
-        
-        if (window.innerWidth <= 768) {
-            panel.classList.add('oculto'); 
-        }
-    });
-
+    // NUEVO: Buscador que filtra las tarjetas div
     document.getElementById('route-search').addEventListener('input', (e) => {
         const term = e.target.value.toLowerCase();
-        const sel = document.getElementById('route-selector');
-        Array.from(sel.options).forEach(opt => {
-            opt.style.display = opt.text.toLowerCase().includes(term) ? 'block' : 'none';
+        document.querySelectorAll('.route-card').forEach(card => {
+            card.style.display = card.innerText.toLowerCase().includes(term) ? 'block' : 'none';
         });
     });
 
@@ -117,21 +103,36 @@ function setupEventListeners() {
 
     document.getElementById('btn-ubicacion').addEventListener('click', () => {
         map.locate({setView: true, maxZoom: 16});
-        if (window.innerWidth <= 768) {
-            panel.classList.add('oculto'); 
-        }
+        if (window.innerWidth <= 768) panel.classList.add('oculto'); 
     });
 }
 
+// NUEVO: Crea tarjetas HTML (divs) en lugar del viejo Select
 function fillSelector() {
-    const sel = document.getElementById('route-selector');
-    sel.innerHTML = '<option value="">Elegí una línea</option>';
+    const lista = document.getElementById('route-list');
+    lista.innerHTML = ''; 
+    
     data.routes.sort((a,b) => a.route_short_name.localeCompare(b.route_short_name, undefined, {numeric: true}))
                .forEach(r => {
-                    const opt = document.createElement('option');
-                    opt.value = r.route_id;
-                    opt.innerText = `${r.route_short_name} - ${r.route_long_name}`;
-                    sel.appendChild(opt);
+                    const div = document.createElement('div');
+                    div.className = 'route-card';
+                    div.innerText = `${r.route_short_name} - ${r.route_long_name}`;
+                    
+                    div.addEventListener('click', () => {
+                        // Despintar todas y pintar la clickeada
+                        document.querySelectorAll('.route-card').forEach(c => c.classList.remove('active'));
+                        div.classList.add('active');
+                        
+                        currentRouteId = r.route_id;
+                        filterMap(currentRouteId);
+                        
+                        // Ocultar panel en celu automáticamente
+                        if (window.innerWidth <= 768) {
+                            document.getElementById('panel-interfaz').classList.add('oculto');
+                        }
+                    });
+
+                    lista.appendChild(div);
                });
 }
 
