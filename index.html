@@ -11,25 +11,38 @@
     <div id="map"></div>
     
     <div class="ui-overlay" id="panel-interfaz">
-        <div class="drag-area" id="btn-colapsar">
-            <div class="drag-handle"></div>
-        </div>
-
+        <div class="drag-area" id="btn-colapsar"><div class="drag-handle"></div></div>
         <h1>BondiComunidad 🚌</h1>
         
-        <div class="search-box">
-            <input type="text" id="route-search" placeholder="🔍 Buscar línea (ej: 20, 80)...">
+        <div class="tabs">
+            <button class="tab-btn active" id="tab-lineas">Ver Líneas</button>
+            <button class="tab-btn" id="tab-viajar">Cómo Ir</button>
         </div>
 
-        <div class="direction-toggle">
-            <input type="radio" id="dir0" name="direction" value="0" checked>
-            <label for="dir0">➡️ Ida</label>
-            <input type="radio" id="dir1" name="direction" value="1">
-            <label for="dir1">⬅️ Vuelta</label>
+        <div id="seccion-lineas" class="tab-content active">
+            <div class="search-box">
+                <input type="text" id="route-search" placeholder="🔍 Buscar línea (ej: 20, 80)...">
+            </div>
+            <div class="direction-toggle">
+                <input type="radio" id="dir0" name="direction" value="0" checked>
+                <label for="dir0">➡️ Ida</label>
+                <input type="radio" id="dir1" name="direction" value="1">
+                <label for="dir1">⬅️ Vuelta</label>
+            </div>
+            <div id="route-list" class="route-list">
+                <div style="padding: 10px; text-align: center; color: #7f8c8d;">Sincronizando datos...</div>
+            </div>
         </div>
 
-        <div id="route-list" class="route-list">
-            <div style="padding: 10px; text-align: center; color: #7f8c8d;">Sincronizando datos...</div>
+        <div id="seccion-viajar" class="tab-content" style="display: none;">
+            <div class="routing-box">
+                <input type="text" id="origen-input" placeholder="🟢 Desde (ej: Patio Olmos)...">
+                <input type="text" id="destino-input" placeholder="🔴 Hasta (ej: Ciudad Universitaria)...">
+                <button id="btn-buscar-viaje" class="loc-btn" style="margin-top: 10px; padding: 10px;">🔍 Buscar Viaje</button>
+            </div>
+            <div id="resultados-viaje" class="route-list" style="margin-top: 10px;">
+                <div style="text-align: center; font-size: 13px; color: #95a5a6; padding: 10px;">Ingresá origen y destino. Solo Córdoba Capital.</div>
+            </div>
         </div>
 
         <button class="loc-btn" id="btn-ubicacion">📍 Mi ubicación</button>
