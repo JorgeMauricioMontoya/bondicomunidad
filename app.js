@@ -1,16 +1,23 @@
 /**
- * BONDI COMUNIDAD CBA - VERSIÓN ULTRA (BÚSQUEDA MEJORADA)
- * Analista/Dev: Mauricio
+ * BONDI COMUNIDAD CBA - MOTOR FINAL OPTIMIZADO
+ * Dev: Mauricio | Córdoba, Argentina
  */
 
 const SUPABASE_URL = 'https://zalkomeeezqxvtbngvea.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_9thMFetbvy1HD5Ck8u--OQ_BoOG-6NR';
 const _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const map = L.map('map', { zoomControl: false }).setView([-31.4167, -64.1833], 13);
+// Configuración del Mapa con Canvas para mejor rendimiento en móviles
+const map = L.map('map', { zoomControl: false, preferCanvas: true }).setView([-31.4167, -64.1833], 13);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
 
-let data = { routes: [], trips: [], stops: [], stopTimes: [], shapes: [], agencies: [], calendar: [], calendar_dates: [] };
+// ÍNDICES DE ALTA VELOCIDAD
+let data = { routes: [], trips: [], stops: [], calendar: [], calendar_dates: [] };
+let stopsIndex = {};      
+let stopTimesByTrip = {}; 
+let shapesIndex = {};     
+let routesIndex = {};     
+
 let markersLayer = L.layerGroup().addTo(map);
 let routeLineLayer = L.layerGroup().addTo(map);
 let busLayer = L.layerGroup().addTo(map);
@@ -19,148 +26,223 @@ let currentRouteId = "";
 let currentDirection = "0"; 
 let userMarker = null; 
 let intervaloBondi = null; 
+let debounceTimer;
 
+// CARGA DE ARCHIVOS
 async function loadFile(file) {
     const res = await fetch(file);
     const text = await res.text();
     return new Promise(resolve => {
-        Papa.parse(text, { header: true, skipEmptyLines: true, transformHeader: h => h.trim().replace(/^\uFEFF/,''), complete: r => resolve(r.data) });
+        Papa.parse(text, { 
+            header: true, 
+            skipEmptyLines: true, 
+            transformHeader: h => h.trim().replace(/^\uFEFF/,''), 
+            complete: r => resolve(r.data) 
+        });
     });
 }
 
-function getValidServiceIds() {
-    const fechaHoy = new Date();
-    const hoyStr = fechaHoy.toISOString().split('T')[0].replace(/-/g, '');
-    const dias = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const hoyNombre = dias[fechaHoy.getDay()];
-
-    let validos = data.calendar.filter(c => hoyStr >= c.start_date && hoyStr <= c.end_date && c[hoyNombre] === '1').map(c => String(c.service_id).trim());
-    data.calendar_dates.forEach(ex => {
-        if (ex.date === hoyStr) {
-            const sId = String(ex.service_id).trim();
-            if (ex.exception_type === '1') validos.push(sId);
-            else if (ex.exception_type === '2') validos = validos.filter(id => id !== sId);
-        }
-    });
-    return [...new Set(validos)];
-}
-
+// INICIALIZACIÓN Y OPTIMIZACIÓN DE DATOS
 async function init() {
-    document.getElementById('status').innerText = "Sincronizando con GTFS...";
+    const statusEl = document.getElementById('status');
+    statusEl.innerText = "Sincronizando datos...";
+
     const files = ['routes.txt', 'trips.txt', 'stops.txt', 'stop_times.txt', 'shapes.txt', 'agency.txt', 'calendar.txt', 'calendar_dates.txt'];
     const res = await Promise.all(files.map(f => loadFile(f)));
-    data.routes = res[0]; data.trips = res[1]; data.stops = res[2]; data.stopTimes = res[3]; data.shapes = res[4]; data.agencies = res[5]; data.calendar = res[6]; data.calendar_dates = res[7];
-    document.getElementById('status').innerText = "✅ Córdoba Online";
+    
+    statusEl.innerText = "Optimizando motor...";
+    
+    data.routes = res[0];
+    data.trips = res[1];
+    data.stops = res[2];
+    data.calendar = res[6];
+    data.calendar_dates = res[7];
+
+    // 1. Indexar Paradas y Rutas para acceso instantáneo
+    res[2].forEach(s => stopsIndex[s.stop_id.trim()] = s);
+    res[0].forEach(r => routesIndex[r.route_id.trim()] = r);
+
+    // 2. Indexar Horarios agrupados por Viaje y ORDENADOS por secuencia
+    res[3].forEach(st => {
+        const tid = st.trip_id.trim();
+        if (!stopTimesByTrip[tid]) stopTimesByTrip[tid] = [];
+        stopTimesByTrip[tid].push(st);
+    });
+    for (let tid in stopTimesByTrip) {
+        stopTimesByTrip[tid].sort((a, b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
+    }
+
+    // 3. Indexar Recorridos (Shapes)
+    res[4].forEach(sh => {
+        const sid = sh.shape_id.trim();
+        if (!shapesIndex[sid]) shapesIndex[sid] = [];
+        shapesIndex[sid].push([parseFloat(sh.shape_pt_lat), parseFloat(sh.shape_pt_lon)]);
+    });
+
+    statusEl.innerText = "✅ Córdoba Online";
     fillSelector();
     setupEventListeners(); 
 }
 
+// EVENTOS DE INTERFAZ
 function setupEventListeners() {
     const panel = document.getElementById('panel-interfaz');
     
-    document.getElementById('tab-lineas').addEventListener('click', () => {
-        document.getElementById('tab-lineas').classList.add('active');
-        document.getElementById('tab-viajar').classList.remove('active');
-        document.getElementById('seccion-lineas').style.display = 'block';
-        document.getElementById('seccion-viajar').style.display = 'none';
-    });
-    
-    document.getElementById('tab-viajar').addEventListener('click', () => {
-        document.getElementById('tab-viajar').classList.add('active');
-        document.getElementById('tab-lineas').classList.remove('active');
-        document.getElementById('seccion-viajar').style.display = 'block';
-        document.getElementById('seccion-lineas').style.display = 'none';
-    });
+    document.getElementById('tab-lineas').onclick = () => toggleTab('lineas');
+    document.getElementById('tab-viajar').onclick = () => toggleTab('viajar');
+    document.getElementById('btn-colapsar').onclick = () => panel.classList.toggle('oculto');
 
-    document.getElementById('btn-colapsar').addEventListener('click', () => panel.classList.toggle('oculto'));
-    document.querySelector('#panel-interfaz h1').addEventListener('click', () => panel.classList.toggle('oculto'));
-
+    // Buscador con Debounce (espera a que termines de escribir)
     document.getElementById('route-search').addEventListener('input', (e) => {
-        const term = e.target.value.toLowerCase();
-        document.querySelectorAll('.route-card').forEach(card => card.style.display = card.innerText.toLowerCase().includes(term) ? 'block' : 'none');
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            const term = e.target.value.toLowerCase();
+            document.querySelectorAll('.route-card').forEach(card => {
+                card.style.display = card.innerText.toLowerCase().includes(term) ? 'block' : 'none';
+            });
+        }, 300);
     });
 
     document.querySelectorAll('input[name="direction"]').forEach(radio => {
-        radio.addEventListener('change', (e) => { currentDirection = e.target.value; if (currentRouteId) filterMap(currentRouteId); });
+        radio.onchange = (e) => { 
+            currentDirection = e.target.value; 
+            if (currentRouteId) filterMap(currentRouteId); 
+        };
     });
 
-    document.getElementById('btn-ubicacion').addEventListener('click', () => {
-        map.locate({setView: true, maxZoom: 16});
-        if (window.innerWidth <= 768) panel.classList.add('oculto'); 
-    });
+    document.getElementById('btn-ubicacion').onclick = () => map.locate({setView: true, maxZoom: 16});
+    document.getElementById('btn-buscar-viaje').onclick = buscarViaje;
 
     map.on('locationfound', (e) => {
         if (userMarker) map.removeLayer(userMarker);
         userMarker = L.marker(e.latlng).addTo(map).bindPopup("📍 Estás aquí").openPopup();
-        if(document.getElementById('seccion-viajar').style.display === 'block') {
-            document.getElementById('origen-input').value = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
-        }
+        document.getElementById('origen-input').value = `${e.latlng.lat.toFixed(6)}, ${e.latlng.lng.toFixed(6)}`;
     });
-
-    document.getElementById('btn-buscar-viaje').addEventListener('click', buscarViaje);
 }
 
+function toggleTab(tab) {
+    const isL = tab === 'lineas';
+    document.getElementById('seccion-lineas').style.display = isL ? 'block' : 'none';
+    document.getElementById('seccion-viajar').style.display = isL ? 'none' : 'block';
+    document.getElementById('tab-lineas').classList.toggle('active', isL);
+    document.getElementById('tab-viajar').classList.toggle('active', !isL);
+}
+
+// LLENAR LISTA DE LÍNEAS
 function fillSelector() {
     const lista = document.getElementById('route-list');
-    lista.innerHTML = ''; 
+    const fragment = document.createDocumentFragment();
     data.routes.sort((a,b) => a.route_short_name.localeCompare(b.route_short_name, undefined, {numeric: true})).forEach(r => {
         const div = document.createElement('div');
         div.className = 'route-card';
         div.innerText = `${r.route_short_name} - ${r.route_long_name}`;
-        div.addEventListener('click', () => {
+        div.onclick = () => {
             document.querySelectorAll('.route-card').forEach(c => c.classList.remove('active'));
             div.classList.add('active');
             currentRouteId = r.route_id;
             filterMap(currentRouteId);
             if (window.innerWidth <= 768) document.getElementById('panel-interfaz').classList.add('oculto');
-        });
-        lista.appendChild(div);
+        };
+        fragment.appendChild(div);
     });
+    lista.innerHTML = '';
+    lista.appendChild(fragment);
 }
 
-function getDistanciaMts(lat1, lon1, lat2, lon2) {
-    const R = 6371e3; const p1 = lat1 * Math.PI/180; const p2 = lat2 * Math.PI/180;
-    const dp = (lat2-lat1) * Math.PI/180; const dl = (lon2-lon1) * Math.PI/180;
-    const a = Math.sin(dp/2) * Math.sin(dp/2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2) * Math.sin(dl/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-}
+// MOSTRAR RECORRIDO EN MAPA
+async function filterMap(routeId) {
+    if (!routeId) return;
+    markersLayer.clearLayers(); routeLineLayer.clearLayers(); busLayer.clearLayers();
+    if (intervaloBondi) clearInterval(intervaloBondi); 
 
-// BUSCADOR MEJORADO: Intenta varias combinaciones si falla
-async function geocode(texto) {
-    if(texto.includes(',')) {
-        const partes = texto.split(',');
-        if(!isNaN(partes[0])) return { lat: parseFloat(partes[0]), lon: parseFloat(partes[1]) };
+    const route = routesIndex[routeId.trim()];
+    const trips = data.trips.filter(t => t.route_id.trim() === routeId.trim() && t.direction_id.trim() === currentDirection);
+    if(trips.length === 0) {
+        document.getElementById('status').innerText = "Sin recorrido disponible.";
+        return;
     }
 
-    const intentos = [
-        `${texto}, Córdoba, Argentina`,
-        `${texto}, Ciudad de Córdoba, Argentina`,
-        texto
-    ];
-
-    for (let q of intentos) {
-        try {
-            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1&viewbox=-64.31,-31.32,-64.04,-31.52&bounded=1`);
-            const json = await res.json();
-            if(json.length > 0) return { lat: parseFloat(json[0].lat), lon: parseFloat(json[0].lon) };
-        } catch(e) { console.error(e); }
+    const tripMolde = trips[0];
+    const color = route.agency_id === '5' ? '#f39c12' : (route.agency_id === '6' ? '#c0392b' : '#27ae60');
+    
+    // Dibujar Shape (La línea de la calle)
+    const shPoints = shapesIndex[tripMolde.shape_id.trim()] || [];
+    if(shPoints.length > 0) {
+        L.polyline(shPoints, {color: color, weight: 5, opacity: 0.8}).addTo(routeLineLayer);
+        map.fitBounds(L.polyline(shPoints).getBounds(), {padding: [30,30]});
     }
-    return null;
+
+    // Dibujar Paradas
+    const sts = stopTimesByTrip[tripMolde.trip_id.trim()] || [];
+    sts.forEach((st, i) => {
+        const s = stopsIndex[st.stop_id.trim()];
+        if(s) {
+            L.circleMarker([s.stop_lat, s.stop_lon], {
+                radius: (i===0 || i===sts.length-1) ? 7 : 3, 
+                fillColor: color, color: '#fff', weight: 1, fillOpacity: 1
+            }).addTo(markersLayer).bindPopup(s.stop_name);
+        }
+    });
+
+    actualizarFlota(trips);
+    intervaloBondi = setInterval(() => actualizarFlota(trips), 5000);
 }
 
+// SIMULACIÓN DE FLOTA (GPS TEÓRICO)
+function actualizarFlota(trips) {
+    busLayer.clearLayers();
+    const ahora = new Date();
+    const hActSeg = (ahora.getHours() * 3600) + (ahora.getMinutes() * 60) + ahora.getSeconds();
+    let dibujados = 0;
+
+    for(const trip of trips) {
+        if (dibujados >= 15) break; 
+        const paradas = stopTimesByTrip[trip.trip_id.trim()];
+        if(!paradas) continue;
+
+        for(let i=0; i < paradas.length - 1; i++){
+            const tS = convertirAHora(paradas[i].departure_time);
+            const tL = convertirAHora(paradas[i+1].arrival_time);
+
+            if(hActSeg >= tS && hActSeg <= tL){
+                const p1 = stopsIndex[paradas[i].stop_id.trim()];
+                const p2 = stopsIndex[paradas[i+1].stop_id.trim()];
+                if(!p1 || !p2) continue;
+
+                const pct = (hActSeg - tS) / (tL - tS);
+                const lat = parseFloat(p1.stop_lat) + (parseFloat(p2.stop_lat) - parseFloat(p1.stop_lat)) * pct;
+                const lon = parseFloat(p1.stop_lon) + (parseFloat(p2.stop_lon) - parseFloat(p1.stop_lon)) * pct;
+
+                L.marker([lat, lon], {
+                    icon: L.divIcon({html: '🚌', className: 'bus-marker', iconSize:[30,30]})
+                }).addTo(busLayer);
+                dibujados++; break;
+            }
+        }
+    }
+}
+
+// BUSCADOR DE VIAJES (CÓMO IR)
 async function buscarViaje() {
     const btn = document.getElementById('btn-buscar-viaje');
     const panelResultados = document.getElementById('resultados-viaje');
     const txtOrigen = document.getElementById('origen-input').value;
     const txtDestino = document.getElementById('destino-input').value;
 
-    if(!txtOrigen || !txtDestino) { alert("Ingresá puntos de referencia"); return; }
+    if(!txtOrigen || !txtDestino) {
+        alert("Ingresá puntos de referencia (ej: Patio Olmos)");
+        return;
+    }
     
     btn.innerText = "⏳ Buscando en el mapa...";
     panelResultados.innerHTML = "";
-    markersLayer.clearLayers(); routeLineLayer.clearLayers(); busLayer.clearLayers();
+    
+    // Limpiamos capas previas para que no se amontonen marcadores
+    markersLayer.clearLayers(); 
+    routeLineLayer.clearLayers(); 
+    busLayer.clearLayers();
 
+    // 1. Convertir direcciones a coordenadas reales
     const coordsOrigen = await geocode(txtOrigen);
     const coordsDestino = await geocode(txtDestino);
 
@@ -170,72 +252,70 @@ async function buscarViaje() {
         return;
     }
 
-    L.marker([coordsOrigen.lat, coordsOrigen.lon], {icon: L.divIcon({html: '🟢', className: 'bus-marker'})}).addTo(markersLayer);
-    L.marker([coordsDestino.lat, coordsDestino.lon], {icon: L.divIcon({html: '🔴', className: 'bus-marker'})}).addTo(markersLayer);
-    map.fitBounds([[coordsOrigen.lat, coordsOrigen.lon], [coordsDestino.lat, coordsDestino.lon]], {padding: [50, 50]});
+    // --- NUEVO: MARCADORES DE ORIGEN Y DESTINO EN EL MAPA ---
+    const iconOrigen = L.divIcon({ html: '🟢', className: 'bus-marker', iconSize: [30, 30] });
+    const iconDestino = L.divIcon({ html: '🔴', className: 'bus-marker', iconSize: [30, 30] });
+
+    L.marker([coordsOrigen.lat, coordsOrigen.lon], { icon: iconOrigen }).addTo(markersLayer).bindPopup("Tu Origen: " + txtOrigen);
+    L.marker([coordsDestino.lat, coordsDestino.lon], { icon: iconDestino }).addTo(markersLayer).bindPopup("Tu Destino: " + txtDestino);
+
+    // Encuadrar el mapa para que se vean ambos puntos con un margen
+    map.fitBounds([
+        [coordsOrigen.lat, coordsOrigen.lon],
+        [coordsDestino.lat, coordsDestino.lon]
+    ], { padding: [50, 50] });
+    // -------------------------------------------------------
 
     btn.innerText = "⏳ Calculando líneas...";
 
-    // Rango de 800 metros para encontrar paradas
-    const RADIO = 800;
-    const pCercaA = data.stops.filter(s => getDistanciaMts(coordsOrigen.lat, coordsOrigen.lon, s.stop_lat, s.stop_lon) < RADIO).map(s => s.stop_id.trim());
-    const pCercaB = data.stops.filter(s => getDistanciaMts(coordsDestino.lat, coordsDestino.lon, s.stop_lat, s.stop_lon) < RADIO).map(s => s.stop_id.trim());
+    // Radio de 750 metros para buscar paradas
+    const RADIO = 750;
+    const pCercaOrigen = data.stops.filter(s => getDistanciaMts(coordsOrigen.lat, coordsOrigen.lon, s.stop_lat, s.stop_lon) < RADIO).map(s => s.stop_id.trim());
+    const pCercaDestino = data.stops.filter(s => getDistanciaMts(coordsDestino.lat, coordsDestino.lon, s.stop_lat, s.stop_lon) < RADIO).map(s => s.stop_id.trim());
 
-    if(pCercaA.length === 0 || pCercaB.length === 0) {
+    if(pCercaOrigen.length === 0 || pCercaDestino.length === 0) {
         btn.innerText = "🔍 Buscar Viaje";
-        panelResultados.innerHTML = `<div style="padding:10px; text-align:center;">No hay paradas de colectivo cerca de esos puntos.</div>`;
+        panelResultados.innerHTML = `<div style="padding:10px; text-align:center;">No hay paradas cerca de esos puntos (Radio 750m).</div>`;
         return;
     }
 
     const serviciosHoy = getValidServiceIds();
-    const tActual = new Date();
-    const ahoraSeg = convertirAHora(tActual.getHours() + ':' + tActual.getMinutes() + ':' + tActual.getSeconds());
-
+    const ahoraSeg = (new Date().getHours() * 3600) + (new Date().getMinutes() * 60);
     let resultados = [];
-    let lineasVistas = new Set();
+    let rutasVistas = new Set();
 
-    // Optimizamos la búsqueda recorriendo los stopTimes una sola vez
-    const tripsValidos = data.trips.filter(t => serviciosHoy.includes(t.service_id.trim()) || serviciosHoy.length === 0);
-    
-    // Agrupar stopTimes por TripID
-    const stGroup = {};
-    data.stopTimes.forEach(st => {
-        if(!stGroup[st.trip_id]) stGroup[st.trip_id] = [];
-        stGroup[st.trip_id].push(st);
-    });
+    for (const trip of data.trips) {
+        if (!serviciosHoy.includes(trip.service_id.trim()) && serviciosHoy.length > 0) continue;
+        if (rutasVistas.has(trip.route_id)) continue;
 
-    tripsValidos.forEach(trip => {
-        if(lineasVistas.has(trip.route_id)) return;
-        
-        const paradas = stGroup[trip.trip_id];
-        if(!paradas) return;
-        paradas.sort((a,b) => parseInt(a.stop_sequence) - parseInt(b.stop_sequence));
+        const tiempos = stopTimesByTrip[trip.trip_id.trim()];
+        if (!tiempos) continue;
 
         let idxA = -1, idxB = -1;
-        for(let i=0; i<paradas.length; i++){
-            const sid = paradas[i].stop_id.trim();
-            if(idxA === -1 && pCercaA.includes(sid)) idxA = i;
-            if(idxA !== -1 && pCercaB.includes(sid)) { idxB = i; break; }
+        for (let i = 0; i < tiempos.length; i++) {
+            const sid = tiempos[i].stop_id.trim();
+            if (idxA === -1 && pCercaOrigen.includes(sid)) idxA = i;
+            if (idxA !== -1 && pCercaDestino.includes(sid)) { idxB = i; break; }
         }
 
-        if(idxA !== -1 && idxB !== -1 && idxA < idxB) {
-            const hSalidaSeg = convertirAHora(paradas[idxA].departure_time);
+        if (idxA !== -1 && idxB !== -1) {
+            const hSalidaSeg = convertirAHora(tiempos[idxA].departure_time);
             const diffMin = Math.round((hSalidaSeg - ahoraSeg) / 60);
 
-            if(diffMin >= -5 && diffMin < 120) {
-                const route = data.routes.find(r => r.route_id === trip.route_id);
+            if (diffMin >= -10 && diffMin < 120) {
+                const rInfo = routesIndex[trip.route_id.trim()];
                 resultados.push({
-                    id: route.route_id,
-                    name: route.route_short_name,
+                    id: trip.route_id,
+                    name: rInfo ? rInfo.route_short_name : "S/N",
                     min: diffMin < 0 ? 0 : diffMin,
-                    parada: data.stops.find(s => s.stop_id.trim() === paradas[idxA].stop_id.trim()).stop_name,
+                    parada: stopsIndex[tiempos[idxA].stop_id.trim()].stop_name,
                     dir: trip.direction_id,
-                    h: paradas[idxA].departure_time.substring(0,5)
+                    hora: tiempos[idxA].departure_time.substring(0,5)
                 });
-                lineasVistas.add(trip.route_id);
+                rutasVistas.add(trip.route_id);
             }
         }
-    });
+    }
 
     btn.innerText = "🔍 Buscar Viaje";
     if(resultados.length === 0) {
@@ -244,77 +324,52 @@ async function buscarViaje() {
         resultados.sort((a,b) => a.min - b.min).forEach(v => {
             const d = document.createElement('div');
             d.className = 'viaje-result-card';
-            d.innerHTML = `<div class="viaje-badge">${v.name}</div><div class="viaje-info"><strong>Sube en:</strong> ${v.parada}<br>Hora: ${v.h}</div><div class="viaje-eta">${v.min}<small>min</small></div>`;
-            d.addEventListener('click', () => {
+            d.style.cursor = "pointer";
+            d.innerHTML = `
+                <div class="viaje-badge">${v.name}</div>
+                <div class="viaje-info"><strong>Sube en:</strong> ${v.parada}<br>Hora: ${v.hora}</div>
+                <div class="viaje-eta">${v.min}<small>min</small></div>
+            `;
+            d.onclick = () => {
                 currentDirection = v.dir;
                 filterMap(v.id);
                 if(window.innerWidth <= 768) document.getElementById('panel-interfaz').classList.add('oculto');
-            });
+            };
             panelResultados.appendChild(d);
         });
     }
 }
-
-// MOTOR DE MAPA Y FLOTA (MANTENIDO)
-async function filterMap(routeId) {
-    if (!routeId) return;
-    markersLayer.clearLayers(); routeLineLayer.clearLayers(); busLayer.clearLayers();
-    if (intervaloBondi) clearInterval(intervaloBondi); 
-    const serviciosHoy = getValidServiceIds();
-    let trips = data.trips.filter(t => t.route_id.trim() === routeId.trim() && t.direction_id.trim() === currentDirection);
-    if(trips.length === 0) { document.getElementById('status').innerText = "Sin recorrido."; return; }
-    const tripMolde = trips[0];
-    const route = data.routes.find(r => r.route_id === routeId);
-    const color = route.agency_id.trim() === '5' ? '#f39c12' : (route.agency_id.trim() === '6' ? '#c0392b' : '#27ae60');
-    
-    const shPoints = data.shapes.filter(sh => sh.shape_id.trim() === tripMolde.shape_id.trim()).sort((a,b) => a.shape_pt_sequence - b.shape_pt_sequence).map(sh => [parseFloat(sh.shape_pt_lat), parseFloat(sh.shape_pt_lon)]);
-    if(shPoints.length > 0) L.polyline(shPoints, {color: color, weight: 6}).addTo(routeLineLayer);
-
-    const sts = data.stopTimes.filter(st => st.trip_id.trim() === tripMolde.trip_id.trim()).sort((a,b) => a.stop_sequence - b.stop_sequence);
-    sts.forEach((st, i) => {
-        const s = data.stops.find(x => x.stop_id.trim() === st.stop_id.trim());
-        if(s) L.circleMarker([s.stop_lat, s.stop_lon], {radius: (i===0||i===sts.length-1)?8:4, fillColor: color, color: '#fff', weight: 2, fillOpacity: 1}).addTo(markersLayer).bindPopup(s.stop_name);
-    });
-
-    actualizarFlota(trips);
-    intervaloBondi = setInterval(() => actualizarFlota(trips), 5000);
-    if(shPoints.length > 0) map.fitBounds(L.polyline(shPoints).getBounds(), {padding: [30,30]});
-}
-
-function actualizarFlota(trips) {
-    busLayer.clearLayers();
-    const t = new Date();
-    const hAct = t.getHours().toString().padStart(2, '0') + ':' + t.getMinutes().toString().padStart(2, '0') + ':' + t.getSeconds().toString().padStart(2, '0');
-    const hActSeg = convertirAHora(hAct);
-    let dibujados = 0;
-
-    const tIds = trips.map(x => x.trip_id.trim());
-    const sts = data.stopTimes.filter(x => tIds.includes(x.trip_id.trim()));
-    const stsByTrip = {};
-    sts.forEach(x => { if(!stsByTrip[x.trip_id]) stsByTrip[x.trip_id] = []; stsByTrip[x.trip_id].push(x); });
-
-    for(const tid in stsByTrip) {
-        if(dibujados >= 6) break;
-        const paradas = stsByTrip[tid].sort((a,b) => a.stop_sequence - b.stop_sequence);
-        for(let i=0; i<paradas.length-1; i++){
-            const hS = paradas[i].departure_time.trim();
-            const hL = paradas[i+1].arrival_time.trim();
-            if(hAct >= hS && hAct <= hL){
-                const p1 = data.stops.find(x => x.stop_id.trim() === paradas[i].stop_id.trim());
-                const p2 = data.stops.find(x => x.stop_id.trim() === paradas[i+1].stop_id.trim());
-                const pct = (hActSeg - convertirAHora(hS)) / (convertirAHora(hL) - convertirAHora(hS));
-                const lat = parseFloat(p1.stop_lat) + (parseFloat(p2.stop_lat) - parseFloat(p1.stop_lat)) * pct;
-                const lon = parseFloat(p1.stop_lon) + (parseFloat(p2.stop_lon) - parseFloat(p1.stop_lon)) * pct;
-                L.marker([lat, lon], {icon: L.divIcon({html: '🚌', className: 'bus-marker', iconSize:[30,30]})}).addTo(busLayer);
-                dibujados++; break;
-            }
-        }
-    }
+// FUNCIONES AUXILIARES
+function getDistanciaMts(lat1, lon1, lat2, lon2) {
+    const p = 0.017453292519943295;
+    const a = 0.5 - Math.cos((lat2 - lat1) * p)/2 + Math.cos(lat1 * p) * Math.cos(lat2 * p) * (1 - Math.cos((lon2 - lon1) * p))/2;
+    return 12742000 * Math.asin(Math.sqrt(a));
 }
 
 function convertirAHora(h) {
     const p = h.split(':').map(Number);
     return (p[0] * 3600) + (p[1] * 60) + (p[2] || 0);
+}
+
+function getValidServiceIds() {
+    const hoy = new Date();
+    const hoyStr = hoy.toISOString().split('T')[0].replace(/-/g, '');
+    const dias = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const hoyNombre = dias[hoy.getDay()];
+    let v = data.calendar.filter(c => hoyStr >= c.start_date && hoyStr <= c.end_date && c[hoyNombre] === '1').map(c => c.service_id.trim());
+    return [...new Set(v)];
+}
+
+async function geocode(texto) {
+    if(texto.includes(',')) {
+        const p = texto.split(',');
+        if(!isNaN(p[0])) return { lat: parseFloat(p[0]), lon: parseFloat(p[1]) };
+    }
+    try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(texto + ', Cordoba, Argentina')}&limit=1`);
+        const json = await res.json();
+        return json.length > 0 ? { lat: parseFloat(json[0].lat), lon: parseFloat(json[0].lon) } : null;
+    } catch(e) { return null; }
 }
 
 init();
